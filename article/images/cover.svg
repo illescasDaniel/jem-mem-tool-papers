@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 840" font-family="Helvetica, Arial, sans-serif">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0F172A"/><stop offset="1" stop-color="#1E293B"/></linearGradient></defs>
+<rect width="1600" height="840" fill="url(#bg)"/>
+<g stroke="#334155" stroke-width="1" opacity=".5">
+<path d="M0 120H1600M0 240H1600M0 360H1600M0 480H1600M0 600H1600M0 720H1600"/></g>
+<text x="90" y="300" fill="#F8FAFC" font-size="84" font-weight="700">Giving coding agents</text>
+<text x="90" y="400" fill="#F8FAFC" font-size="84" font-weight="700">a memory</text>
+<text x="90" y="480" fill="#94A3B8" font-size="34">State, facts and rules, kept in separate layers</text>
+<text x="90" y="740" fill="#64748B" font-size="26">Daniel Illescas Romero · 2026</text>
+<g transform="translate(930 0)">
+<g transform="skewX(-20)">
+<rect x="270" y="190" width="420" height="120" rx="18" fill="#FEF3C7"/>
+<rect x="170" y="340" width="420" height="120" rx="18" fill="#DCFCE7"/>
+<rect x="70" y="490" width="420" height="120" rx="18" fill="#E0F2FE"/>
+</g>
+<g font-size="34" font-weight="700" fill="#0F172A">
+<text x="330" y="262">Rules</text><text x="230" y="412">State</text><text x="130" y="562">Facts</text></g>
+<g font-size="20" fill="#475569"><text x="330" y="292">AGENTS.md</text><text x="230" y="442">memory bank</text><text x="130" y="592">jevmem</text></g>
+</g></svg>
