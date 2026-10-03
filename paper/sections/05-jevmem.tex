@@ -25,7 +25,7 @@ A \code{Decider} protocol hides the model; \code{JevDecider} counts calls, token
 All state lives in one SQLite file (\code{~/.jevmem/memory.db} by default; Table~\ref{tab:schema}). Notes are nodes with an embedding, an optional timestamp (the date of the \emph{fact}, not of the write), entities, eight type scores, a source, and the git branch and commit at write time. Edges are typed (\code{semantic}, \code{temporal}, \code{causal}, \code{entity}) and weighted. Several properties came from bugs and are worth stating:
 
 \begin{itemize}
-\item \textbf{Ids are never reused.} The next id is $\max(\mathrm{MAX}(id),\ \mathrm{meta.max\_node\_id})+1$. Consolidation watermarks and edges refer to ids, and reuse after a deletion corrupted them.
+\item \textbf{Ids are never reused.} The next id is one more than the larger of the current maximum \code{id} and \code{meta.max_node_id}. Consolidation watermarks and edges refer to ids, and reuse after a deletion corrupted them.
 \item \textbf{The database remembers its embedder.} A conflicting \code{JEVMEM_EMBEDDER} raises \code{EmbedderMismatch} unless \code{jevmem reembed} is run, because vectors from two models are not comparable.
 \item \textbf{The index is derived.} \code{nodes.emb} is the source of truth. Any of five vector indexes (\S\ref{sec:index}) can be dropped and rebuilt.
 \item \textbf{Nothing is overwritten.} Consolidation sets flags on notes; deletion is explicit (\code{memory_forget}) and cascades to every dependent table.
@@ -68,9 +68,9 @@ A write (Figure~\ref{fig:write}) costs \textbf{two} Jev calls when the store has
 \paragraph{Call 1: typing and screening.} One batch asks eight type Nouls (episodic, semantic, procedural, preference, decision, bugfix, convention, gotcha), \code{status} and \code{injection}. Types are overlapping annotations, not categories, and later drive ranking at session start. A note with $p_\text{status}\ge 0.85$ is rejected with the message to keep current state in markdown or to restate it as a dated fact; a note with $p_\text{injection}\ge 0.5$ is rejected. The injection question is worded to catch text that addresses or subverts \emph{the AI}, so that a team imperative (``never use pip'') passes; the first wording blocked 9 of 15 benign notes (\S\ref{sec:eval}).
 
 \paragraph{Candidates.} Unlike \jevmempaper, which admits every observation, \jevmem{} screens before storing (a deliberate deviation, \S\ref{sec:deviations}), but like it, candidate discovery is separate from relation judgment. Up to $K_w=10$ candidates from the note's scope plus \code{global} are fused:
-\begin{equation}
-s_\text{cand}(u)=\sum_{L\in\{\text{vec},\text{bm25}\}}\frac{1}{60+\mathrm{rank}_L(u)}+\tfrac{1}{30}[\text{shared entity}]+\tfrac{1}{90}[\text{near in time}].
-\end{equation}
+\begin{multline}
+s_\text{cand}(u)=\sum_{L\in\{\text{vec},\text{bm25}\}}\frac{1}{60+\mathrm{rank}_L(u)}\\+\tfrac{1}{30}[\text{shared entity}]+\tfrac{1}{90}[\text{near in time}].
+\end{multline}
 
 \paragraph{Call 2: relations.} One batched call asks, for every candidate, \code{semantic}, \code{candidate_causes_new} and \code{new_causes_candidate}; an edge is stored when $p\ge\theta_\text{rel}=0.60$ (causal edges are directed). Entity edges (shared identifiers) and temporal edges (earlier $\to$ later when both notes have timestamps) are created in code, since Jev reads literally and cannot order dates.
 
@@ -90,7 +90,7 @@ Recall searches the requested scope plus \code{global} and has three modes (Figu
 
 \paragraph{Lite (1 call, $\approx$0.25\,s, $\approx$2.1k input tokens).} Vector top-20, then one batched call judges each candidate's relevance and answers four whole-question Nouls: evidence sufficient, evidence missing, multi-hop, temporal. Candidates below 0.30 relevance are dropped. The result is \code{sufficient} iff $p_\text{suff}\ge 0.30$ and $p_\text{miss}<0.70$ and evidence is non-empty. If Jev is down, lite degrades to plain vector top-$k$ with \code{sufficient=null}.
 
-\paragraph{Full (route, anchor, expand, stop).} Following \jevmempaper{}, one routing call scores need for four graphs $g\in\{\text{semantic, temporal, causal, entity}\}$, multi-hop need $h$ and recency importance $r$. A graph is active when $p_g\ge 0.30$ (else semantic only). The edge budget $B=80$ is split over active graphs by largest remainder with a minimum of $m=1$:
+\paragraph{Full (route, anchor, expand, stop).} Following \jevmempaper{}, one routing call scores need for four graphs (semantic, temporal, causal, entity), multi-hop need $h$ and recency importance $r$. A graph is active when $p_g\ge 0.30$ (else semantic only). The edge budget $B=80$ is split over active graphs by largest remainder with a minimum of $m=1$:
 \begin{equation}
 w_g=\frac{p_g^{\gamma}}{\sum_{j\in A}p_j^{\gamma}},\qquad b_g=m+\mathrm{LR}_g\big[(B-m|A|)\,w_g\big],\ \gamma=1,
 \end{equation}
