@@ -1,0 +1,32 @@
+\section{A Three-Tier Memory Model}
+\label{sec:model}
+
+We split what an agent should remember by how it ages (Figure~\ref{fig:tiers}).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{figures/tiers.pdf}
+\caption{The three tiers. State lives in git-tracked markdown and is rewritten as work moves on; facts live in \jevmem{} and are dated and immutable (they are superseded, never edited); rules live in the instruction file. A significant decision is recorded in the decision log \emph{and} as a one-fact note.}
+\label{fig:tiers}
+\end{figure*}
+
+\begin{table}[t]
+\caption{What goes where. The right column is the failure each placement avoids.}
+\label{tab:tiers}
+\small
+\begin{tabular}{@{}p{1.15cm}p{2.9cm}p{3.1cm}@{}}
+\toprule
+Tier & Content & Failure avoided \\
+\midrule
+State & focus, blockers, next step, open items & a ``next step'' stored as a fact is false the next day and nothing says so \\
+Facts & decisions with reasons, bug causes, gotchas, preferences & re-deriving (or contradicting) a past decision; reading a 176\,KB log \\
+Rules & what must \emph{always} hold & paying for a rule twice (always-in-context plus recalled) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{State} is anything of the form ``where are we''. It must be cheap to rewrite and easy to review, so it lives in markdown under version control, which gives branch- and worktree-local context for free. \paragraph{Facts} are statements that remain true after the work moves on and that a future session may need only occasionally: ``on 2026-10-02 we chose X over Y because Z''. They are too numerous to read at session start and too sparse to keep in an always-loaded file, so they are retrieved on demand. \paragraph{Rules} are imperative and universal; they belong in the file the agent always loads and a human reviews.
+
+\paragraph{Why the boundary matters.} Our first deployment mixed the tiers. The semantic store had ``picked up a copy of the next steps and restatements of rules'' (decision of 2026-10-03, \S\ref{sec:spacemaker}). The risk was concrete: a recalled ``next step'' would be read as a fact long after it stopped being true, and a recalled rule would be paid for twice, once from the instruction file and once from recall. The fix was a convention (this model) \emph{and} mechanism: \jevmem{} rejects notes that read as work status at write time (\S\ref{sec:write}) and skips notes the instruction files already say when it starts a session (\S\ref{sec:hooks}).
+
+\paragraph{The overlap rule.} A \emph{significant decision} gets two records. The markdown entry (context, decision, rationale) is the narrative a human reads; the one-fact note is the retrievable form that a future session finds by asking. Neither is derived from the other automatically; the agent writes both, which is cheap because the facts are already in its context.

@@ -1,0 +1,22 @@
+@startuml tiers
+!include style.iuml
+skinparam rectangle {
+  RoundCorner 14
+}
+
+rectangle "**Rules**\nwhat the agent must always do\n\n//AGENTS.md / CLAUDE.md//\nalways in context · reviewed like code\n\n//e.g. tabs, phase gates, test style//" as R #FEF3C7
+rectangle "**State**\nwhere we are right now\n\n//memory/ markdown, tracked in git//\nactiveContext · progress · archive\nrewritten as work moves on\n//+ decisions.md (append-only log)//\n\n//e.g. next step, open bugs, branch focus//" as S #DCFCE7
+rectangle "**Facts**\ndated, one fact per note, still true later\n\n//jevmem (typed SQLite graph)//\nrecalled on demand · consolidated\n\n//e.g. why Move is verified,//\n//bug causes, gotchas, preferences//" as F #E0F2FE
+
+S -right-> F : a significant decision\nis also written as a\none-fact note
+note bottom of S
+  If stored in jevmem as a "fact",
+  it goes stale silently.
+end note
+F -[hidden]right-> R
+note bottom of R
+  Duplicated in recall = tokens
+  spent twice (jevmem skips
+  notes AGENTS.md already says).
+end note
+@enduml

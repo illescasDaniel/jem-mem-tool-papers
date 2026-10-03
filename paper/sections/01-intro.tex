@@ -1,0 +1,25 @@
+\section{Introduction}
+\label{sec:intro}
+
+A coding agent that works on a project for weeks forgets everything between sessions. Three mechanisms are in common use to compensate, and each fails in a characteristic way.
+
+\emph{Instruction files} such as \code{AGENTS.md} or \code{CLAUDE.md}~\cite{agentsmd} are always in context, which makes them the right place for rules, but they are static, and stuffing every past decision into them costs tokens on every turn and degrades long-context use~\cite{liu2024lost}. \emph{Built-in or generic agent memories} keep free-form notes, but they do not distinguish a durable fact (``on 2026-10-02 we chose X over Y because Z'') from a transient one (``next step: wire the settings page''). The second kind is wrong a day later and nobody notices. \emph{Retrieval over a vector store} (the setting of most agent-memory research~\cite{packer2023memgpt,xu2025amem,chhikara2025mem0}) returns whatever is closest in embedding space: five notes for every question, including when the answer is not in memory at all.
+
+This paper describes a layered alternative that we use on a real project and that has two parts.
+
+\begin{enumerate}
+\item A \textbf{memory bank}: a small folder of git-tracked markdown (\code{memory/}) that holds the \emph{current state} of the work: focus, next step, open items, and an append-only decision log. It follows the branch, shows up in pull requests, and needs no service (\S\ref{sec:bank}).
+\item \textbf{\jevmem}: a long-term store for \emph{dated facts that stay true}: decisions with their reasons, bug causes, gotchas, user preferences. It is an independent implementation, for coding agents, of the System-One-controlled agentic memory of Jiang et al.~\cite{jiang2026jevmem}: all control decisions are typed questions answered by a fast small model (Jev~\cite{typesafe2026}); the host agent, which is System Two, writes the notes and the answers (\S\ref{sec:jevmem}).
+\end{enumerate}
+
+\noindent\textbf{Naming.} The original paper and our tool are both called ``Jev-Mem''. To avoid confusion we write \jevmempaper{} for the paper's system and \jevmem{} for ours. \jevmem{} is not affiliated with the authors of \jevmempaper{} or with TypeSafe.
+
+\noindent\textbf{Contributions.}
+\begin{itemize}
+\item A \textbf{three-tier model}---state, facts, rules---with an explicit rule for what belongs where and a mechanical enforcement of the boundary (a write screen that rejects status-like notes) (\S\ref{sec:model}).
+\item The \textbf{memory-bank protocol}, a trigger-based update discipline with a hand-off rule (\S\ref{sec:bank}).
+\item The \textbf{design of \jevmem} for coding agents: write, recall (lite/full/auto), order-neutral consolidation, hooks, scopes with git awareness, and a pluggable vector index, together with where and why we deviate from \jevmempaper{} (\S\ref{sec:jevmem}).
+\item An \textbf{engineering account} of building it in two days with a deterministic fake of the model, and of the bugs that using it on a real project exposed (\S\ref{sec:eng}).
+\item A \textbf{field study} on SpaceMaker and an \textbf{evaluation} on public and private sets, including held-out splits and negative results (\S\ref{sec:spacemaker}, \S\ref{sec:eval}).
+\end{itemize}
+Everything described is released: the code at \url{https://github.com/illescasDaniel/jev-mem} (version 0.2.1, MIT) and the skill at \url{https://github.com/illescasDaniel/memory-bank}.

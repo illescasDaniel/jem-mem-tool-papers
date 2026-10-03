@@ -1,0 +1,19 @@
+@startuml recall-h
+!include style.iuml
+skinparam rectangle {
+  RoundCorner 12
+}
+left to right direction
+
+rectangle "memory_recall\n(query, scope,\nmode = auto)" as in
+rectangle "**lite**  ·  1 Jev call  ·  ~0.25 s\nvector top-20\nrelevance filter\n+ sufficient / missing\n+ multi-hop? temporal?" as l #DCFCE7
+rectangle "escalate?\nnothing found\nor P(multi-hop) ≥ 0.6\nor P(temporal) ≥ 0.8" as d #E0F2FE
+rectangle "**full**  ·  ~6 Jev calls  ·  ~1.4 s\n1 route (graphs, depth, recency)\n2 RRF anchors, judged\n3 loop: expand within budget,\n   score candidates, stop check" as f #DCFCE7
+rectangle "**finish**\nstale notes ×0.6\nunmerged branch ×0.8\ntop-k 8\nsufficient = true | false" as o #E0F2FE
+
+in --> l
+l --> d
+d --> f : yes
+d --> o : no
+f --> o
+@enduml

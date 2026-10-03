@@ -1,0 +1,75 @@
+\section{Configuration Defaults}
+\label{app:config}
+
+\begin{table}[h]
+\caption{Selected \code{Config} defaults (\code{jevmem 0.2.1}).}
+\small
+\begin{tabular}{@{}p{3.6cm}p{0.9cm}p{2.7cm}@{}}
+\toprule
+Parameter & Value & Role \\
+\midrule
+\code{relation_threshold} & 0.60 & edge stored \\
+\code{write_candidates} & 10 & $K_w$ \\
+\code{duplicate_similarity} & 0.97 & reject duplicate \\
+\code{status_block} & 0.85 & reject status note \\
+\code{injection_block} & 0.50 & reject injection \\
+\code{capture_standing} & 0.70 & auto-capture \\
+\code{recall_mode} & auto & lite then full \\
+\code{lite_candidates} & 20 & vector top-$N$ \\
+\code{lite_sufficient} & 0.30 & lite sufficient\\
+\code{lite_missing_max} & 0.70 & lite missing\\
+\code{escalate_multi_hop} & 0.60 & lite $\to$ full\\
+\code{escalate_temporal} & 0.80 & lite $\to$ full\\
+\code{activation_threshold} & 0.30 & graph active \\
+\code{graph_budget}, \code{gamma} & 80, 1.0 & $B$, $\gamma$ \\
+\code{anchor_count}, \code{rrf_k} & 30, 60 & anchors, $\kappa$ \\
+\code{beam_width}, \code{max_depth} & 10, 8 & $W$, $D_{\max}$ \\
+\code{sufficient} & 0.50 & stop rule $s_d$\\
+\code{missing_max} & 0.60 & stop rule $m_d$\\
+\code{contradiction_max} & 0.60 & stop rule $c_d$\\
+\code{cont_threshold} & 0.15 & no expected gain \\
+\code{max_nodes}/\code{max_edges} & 60/2400 & limits \\
+\code{max_jev_calls}, \code{time_budget_s} & 19, 15 & limits \\
+\code{top_k} & 8 & returned \\
+\code{min_relevance} & 0.30 & drop anchors \\
+\code{consolidate_every} & 20 & writes per pass \\
+\code{consolidate_candidates} & 3 & neighbours \\
+\code{conflict_same} & 0.70 & conflict\\
+\code{conflict_different} & 0.85 & conflict\\
+\code{conflict_outdated} & 0.80 & conflict\\
+\code{conflict_change} & 0.80 & conflict\\
+\code{cover_threshold} & 0.75 & duplicate/subsumed \\
+\code{promote_threshold} & 0.75 & promote proposal \\
+\code{hook_topic_min} & 0.60 & same-subject \\
+\code{instructions_similarity} & 0.82 & restated filter\\
+\code{instructions_band} & 0.70 & borderline band\\
+\code{session_context_weight} & 8.0 & git boost \\
+\code{unmerged_penalty} & 0.8 & other-branch notes \\
+\code{superseded_penalty} & 0.6 & stale notes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{MCP Tools}
+\begin{itemize}\small
+\item \code{memory_write(content, scope, entities, timestamp, source, pinned)} $\to$ id, rejection reason, degraded flag, top types, edges, consolidation report.
+\item \code{memory_recall(query, scope, max_items, mode)} $\to$ evidence (id, content, timestamp, scope, score, flags), \code{sufficient}, \code{missing}, \code{stop_reason}, \code{jev_calls}, \code{hint}.
+\item \code{memory_pin}, \code{memory_list}, \code{memory_forget}, \code{memory_stats}.
+\item \code{memory_consolidate(all_notes)}, \code{memory_pending_synthesis}, \code{memory_resolve(synthesis_id, text)}, \code{memory_dismiss}, \code{memory_flush_pending}.
+\end{itemize}
+
+\section{Memory-Bank Templates}
+\begin{verbatim}
+## YYYY-MM-DD: <title>        (decisions.md)
+Context: ...   Decision: ...   Rationale: ...
+
+# Active context             (activeContext.md)
+Branch / Current focus / Blockers /
+Just changed / Next steps
+
+date, area, severity, status  (friction/*.md)
+Call / Expected / Got / Workaround / Idea
+\end{verbatim}
+
+\section{Question Style}
+Jev questions are plain English over a named-JSON state. Two representative ones (paraphrased from \code{questions.py}): the \emph{status} question for a write (``Does this observation describe the current state of ongoing work---what is happening now or what to do next---rather than a lasting fact?'') and the order-neutral \emph{reports-change} question for consolidation (``Does either text report that what the other says has changed?'', asked in both directions, maximum taken).

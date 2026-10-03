@@ -1,0 +1,42 @@
+\section{The Memory-Bank Protocol}
+\label{sec:bank}
+
+The memory bank is distributed as an agent skill~\cite{memorybankrepo} (one \code{SKILL.md} plus templates, 13.8\,KB in total). It prescribes five artifacts in \code{memory/}:
+
+\begin{table}[h]
+\caption{Memory-bank files.}
+\label{tab:bankfiles}
+\small
+\begin{tabular}{@{}p{2.55cm}p{3.7cm}p{0.9cm}@{}}
+\toprule
+File & Role & Read at start \\
+\midrule
+\code{activeContext.md} & scratchpad: focus, blockers, just changed, \emph{exact next step} & yes \\
+\code{progress.md} & checklist: done, open, known bugs & yes \\
+\code{decisions.md} & append-only, newest first: context, decision, rationale & search \\
+\code{archive.md} & finished history moved out of the two above & no \\
+\code{friction/} & one dated file per tool/doc/workflow problem (front matter: area, severity, status) & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Session start.} The agent reads \code{activeContext.md} and then \code{progress.md}, and continues from ``Next steps''. If they look stale against the code or \code{git log}, it must say so and ask before acting. Because skills load only when the agent judges them relevant, the project's \code{AGENTS.md} carries a short snippet that makes the read unconditional.
+
+\paragraph{Trigger-based updates.} The skill forbids rewriting files every turn. Updates happen on four triggers: a task is completed or discovered (\code{progress.md}); focus changes, a blocker appears or a step concludes (\code{activeContext.md}); a significant technical, structural or dependency choice is made (\code{decisions.md}); a tool errors, a doc misleads or a workaround is needed (\code{friction/}, written at that moment while work continues). Small trigger-based edits keep diffs reviewable.
+
+\paragraph{Keeping it lean.} \code{activeContext.md} is ``a scratchpad, not a log''; concluded threads move to \code{archive.md} under a dated heading. Nothing is ever deleted from \code{decisions.md} or \code{archive.md}: a reversed decision is a \emph{new} entry that says so.
+
+\paragraph{Hand-off.} Before ending a turn that leaves work unfinished, checkbox state is accurate and \code{activeContext.md} names the exact next step, so a fresh session starts without asking.
+
+\paragraph{Version control.} Memory is committed with the feature commit or in a \code{memory:} commit. Per-developer chores (worktree cleanup) are never tracked. On merge the feature branch's \code{progress.md}/\code{activeContext.md} win and \code{decisions.md} keeps both sides' entries. A new branch gets a fresh \code{progress.md} section and a rewritten \code{activeContext.md}; \code{decisions.md} is left alone.
+
+\paragraph{Friction log.} The optional \code{friction/} folder turns every tool problem into an artifact that can be triaged (\code{grep -l "status: open"}). On SpaceMaker it recorded the bugs of the project's own MCP tooling \emph{and} of \jevmem{} itself (\S\ref{sec:eng}), which closed the loop between using and fixing the tools.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.78\textwidth]{figures/lifecycle.pdf}
+\caption{One session across the three tiers. Rules are loaded unconditionally; \jevmem{} injects a few ranked notes at session start and on-topic notes per prompt; the memory bank is read explicitly and edited on triggers. Settled decisions are written to both the log and the store; hand-off leaves an exact next step.}
+\label{fig:lifecycle}
+\end{figure*}
+
+Figure~\ref{fig:lifecycle} shows how the three tiers interact during a session.

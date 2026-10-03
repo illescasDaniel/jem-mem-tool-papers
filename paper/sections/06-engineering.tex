@@ -1,0 +1,21 @@
+\section{Engineering Notes}
+\label{sec:eng}
+
+\paragraph{Size and process.} \jevmem{} is about 3{,}000 lines in 18 modules; the repository has 23 commits over two calendar days (2026-10-02 and 2026-10-03; version 0.1.0 was prepared for PyPI the evening of the second), followed by 0.2.0 and 0.2.1. The first hour produced a working library, MCP server, CLI, skill, hooks, consolidation and an evaluation harness; the remaining time went to calibration, a held-out set, a pluggable vector index and the fixes below.
+
+\paragraph{Testing without the model.} The suite has 83 test functions (91 cases after parametrization) and runs in about four seconds with no network and no Jev. A \code{FakeDecider} takes small keyword ``oracle'' functions that stand in for the model, and a \code{down} flag simulates outages. Tests are named as behaviours (\code{test_a_note_reporting_a_rename_supersedes_whichever_slot_it_is_in}) and assert \emph{call counts} (two writes cost exactly three calls: type, type, relations), which turns the cost model of \S\ref{sec:jevmem} into a regression test. Index tests compare every backend against brute force and test delete-and-resync. CI runs Ubuntu, macOS and Windows with Python 3.12 and 3.13, a pgvector service job, and an install smoke test of the built wheel (no API key: \code{--help}, \code{warmup}, \code{stats}, both hooks failing open, the MCP tool list).
+
+\paragraph{Bugs that only dogfooding found.} An early deployment on SpaceMaker (82 notes, hooks and recall in daily use) exposed problems that unit tests with a fake model did not:
+\begin{itemize}
+\item \textbf{Id reuse.} Deleting the highest-numbered note let the next write reuse its id, which corrupted consolidation watermarks and stale edges. Ids are now monotonic.
+\item \textbf{Thread-bound SQLite.} Every MCP tool failed with ``SQLite objects created in a thread\dots'' when the framework ran a call on another worker thread. The connection is shared and calls are serialized by a lock. (This was found, logged in SpaceMaker's friction folder, and fixed in the same day.)
+\item \textbf{Stale index across processes.} The in-RAM index did not see notes written by the CLI or hooks; it now watches \code{PRAGMA data_version}.
+\item \textbf{Silent embedder swap.} Changing the embedding model made old vectors incomparable without any error; the database now records its embedder.
+\item \textbf{Hidden exceptions.} The SDK reported failures as ``Error executing tool X''; they now reach the agent as \code{<Type>: <message>}.
+\item \textbf{Silent fallback.} An unknown recall mode ran the full pipeline silently; it is now an error. A call cap that was documented as 16 was not enforced (the old code reached 19), so the true cap was set to 19 after measuring its recall cost (\S\ref{sec:eval}).
+\item \textbf{Case-sensitive scopes.} \code{project:SpaceMaker} and \code{project:spacemaker} were different scopes; 0.2.1 lowercases and migrates.
+\item \textbf{Over-eager merging.} Jev answered ``merge'' with 0.91--0.97 for distinct facts, which led to removing the merge proposal (\S\ref{sec:consolidation}).
+\item \textbf{Over-eager injection screen.} The first injection question blocked 9 of 15 benign notes, mostly team imperatives; it was reworded.
+\end{itemize}
+
+\paragraph{Documentation drift.} A final audit of our own documents found several inconsistencies with the code (a stale ``Beta (v0.1.0)'' status line, a diagram saying SessionStart makes no Jev call when it makes at most one cached call, two different off-topic hook counts, a mismatch in the escalation token saving, and unsourced vendor price/latency figures). In this paper the code is the source of truth, and the figure of the hooks was corrected.

@@ -1,0 +1,51 @@
+\documentclass[sigconf,nonacm]{acmart}
+\settopmatter{printacmref=false}
+\setcopyright{none}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\emergencystretch=2em
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\jevmem}{\textsc{jevmem}}
+\newcommand{\jevmempaper}{Jev-Mem}
+
+\begin{document}
+
+\title{State, Facts and Rules: Layered Project Memory for Coding Agents\\with a Markdown Memory Bank and a System-One-Controlled Note Store}
+
+\author{Daniel Illescas Romero}
+\email{illescasdaniel.dev@gmail.com}
+\affiliation{\institution{Independent}\country{Spain}}
+
+\begin{abstract}
+Coding agents start every session with an empty head. Teams patch this with instruction files (always in context, but static) and with free-form ``memory'' features that mix what is happening \emph{now} with what is \emph{true for good}, so the memory silently goes stale. We describe a layered approach used daily on a real project, SpaceMaker (about 22k lines of Python, 186 commits in 12 days). It separates \emph{state} (a git-tracked markdown \emph{memory bank}), \emph{facts} (dated, one-fact notes in a typed graph store called \jevmem) and \emph{rules} (\code{AGENTS.md}). The core of the paper is \jevmem, an independent implementation of the System-One/System-Two design of Jiang et al.~\cite{jiang2026jevmem} for coding agents. Every high-frequency memory decision (typing, screening, relation judgment, routing, relevance, stopping, consolidation) is a batched, typed question answered by a small model, while a generative LLM is never called inside the store. Thresholds live in code, not prompts. We add what a coding setting needs: write-time screens for credentials, injections and ``current status'' notes, order-neutral consolidation that supersedes stale notes without deleting anything, scopes shared across git worktrees, branch-aware ranking, and Claude Code hooks. On our evaluation sets, \jevmem{} reaches 0.89 recall on 272 LoCoMo questions (vector top-5: 0.70) while injecting 2.3 notes instead of 5, and abstains on 94--98\% of unanswerable questions. In the field, 78\% of SpaceMaker commits touched the memory bank, and a dated decision to split state, facts and rules came out of a real failure: the semantic store had picked up copies of ``next steps'' and of rules. We report the design, the engineering bugs that dogfooding exposed, the numbers, and the limits.
+\end{abstract}
+
+\keywords{agent memory, coding agents, Model Context Protocol, long-term memory, System One, retrieval, consolidation}
+
+\maketitle
+
+\input{sections/01-intro}
+\input{sections/02-background}
+\input{sections/03-model}
+\input{sections/04-bank}
+\input{sections/05-jevmem}
+\input{sections/06-engineering}
+\input{sections/07-spacemaker}
+\input{sections/08-evaluation}
+\input{sections/09-discussion}
+\input{sections/10-conclusion}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+\input{sections/11-appendix}
+
+\end{document}

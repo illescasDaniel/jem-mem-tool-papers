@@ -1,0 +1,187 @@
+\section{\jevmem: Design}
+\label{sec:jevmem}
+
+\subsection{The System-One / System-Two split}
+
+\jevmem{} is a library, an MCP server (\code{jevmem-mcp}, 11 tools), a CLI and a pair of Claude Code hooks over one SQLite file. About 3{,}000 lines of Python in 18 modules implement it (Figure~\ref{fig:arch}). Its invariant is that \textbf{the store never calls a generative LLM}. Every control decision is a batch of typed questions sent to Jev in one call, with the memory content as the named-JSON state, in plain English. Jev returns a probability (Noul) or a distribution (Choice), never text. The host agent (System Two) writes the notes and the answers.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/architecture.pdf}
+\caption{Architecture. The host agent writes atomic dated notes and answers from the recalled evidence; \jevmem{} orchestrates; Jev answers typed questions. SQLite is the source of truth, and the vector index is a rebuildable copy.}
+\label{fig:arch}
+\end{figure*}
+
+Three design rules follow from this split and from the vendor guidance~\cite{typesafeskill}:
+\begin{enumerate}
+\item \textbf{Policy in code.} All thresholds are fields of one \code{Config} dataclass (Appendix~\ref{app:config}). Prompts contain questions, not decisions. The numbers were tuned on data (\S\ref{sec:eval}).
+\item \textbf{Fail closed for judgments, fail open for the session.} A missing Jev answer raises \code{DeciderUnavailable}; it is never read as ``pass''. A write made while Jev is down is stored but hidden and queued (\S\ref{sec:write}). Conversely, every hook swallows errors and injects nothing so that a memory outage can never block a coding session.
+\item \textbf{Code does what code can do.} Jev cannot order dates or follow identifiers, so timestamps, shared entities, rank fusion, budgets and ordering of conflicts are deterministic code.
+\end{enumerate}
+A \code{Decider} protocol hides the model; \code{JevDecider} counts calls, tokens and latency, and \code{FakeDecider} replaces it in tests (\S\ref{sec:eng}).
+
+\subsection{Storage}
+
+All state lives in one SQLite file (\code{~/.jevmem/memory.db} by default; Table~\ref{tab:schema}). Notes are nodes with an embedding, an optional timestamp (the date of the \emph{fact}, not of the write), entities, eight type scores, a source, and the git branch and commit at write time. Edges are typed (\code{semantic}, \code{temporal}, \code{causal}, \code{entity}) and weighted. Several properties came from bugs and are worth stating:
+
+\begin{itemize}
+\item \textbf{Ids are never reused.} The next id is $\max(\mathrm{MAX}(id),\ \mathrm{meta.max\_node\_id})+1$. Consolidation watermarks and edges refer to ids, and reuse after a deletion corrupted them.
+\item \textbf{The database remembers its embedder.} A conflicting \code{JEVMEM_EMBEDDER} raises \code{EmbedderMismatch} unless \code{jevmem reembed} is run, because vectors from two models are not comparable.
+\item \textbf{The index is derived.} \code{nodes.emb} is the source of truth. Any of five vector indexes (\S\ref{sec:index}) can be dropped and rebuilt.
+\item \textbf{Nothing is overwritten.} Consolidation sets flags on notes; deletion is explicit (\code{memory_forget}) and cascades to every dependent table.
+\end{itemize}
+
+\begin{table}[t]
+\caption{SQLite schema (abridged).}
+\label{tab:schema}
+\small
+\begin{tabular}{@{}p{1.65cm}p{5.6cm}@{}}
+\toprule
+Table & Purpose \\
+\midrule
+\code{nodes} & id, content, scope, ts, entities, type scores, source, embedding, git branch/commit \\
+\code{edges} & (src, dst, kind, weight); kinds: semantic, temporal, causal, entity \\
+\code{fts} & FTS5 over content (BM25) \\
+\code{flags} & superseded\_by, duplicate\_of, subsumed\_by, merged\_into, contradicts, pinned \\
+\code{synth} & System-Two proposals: promote, conflict (status: pending/resolved/dismissed) \\
+\code{pending} & degraded-mode queue: unscreened, relations \\
+\code{judged}, \code{pair_queue} & pairs consolidation has compared; co-retrieved pairs awaiting comparison \\
+\code{usage} & per-note useful-injection counter \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Write pipeline}
+\label{sec:write}
+
+A write (Figure~\ref{fig:write}) costs \textbf{two} Jev calls when the store has candidates and one otherwise, independently of how many notes exist.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/write-h.pdf}
+\caption{Write path. Blue steps are deterministic code, green steps are one batched Jev call each. Red outcomes are rejections; the dashed path is the degraded mode when Jev is unreachable.}
+\label{fig:write}
+\end{figure*}
+
+\paragraph{Code gates.} A regex screen rejects credentials (PEM keys, AWS/GitHub/Slack/Google tokens, JWTs, \code{password = ...}, URLs with embedded passwords). A vector lookup rejects a near-duplicate in the same scope (cosine $\ge 0.97$).
+
+\paragraph{Call 1: typing and screening.} One batch asks eight type Nouls (episodic, semantic, procedural, preference, decision, bugfix, convention, gotcha), \code{status} and \code{injection}. Types are overlapping annotations, not categories, and later drive ranking at session start. A note with $p_\text{status}\ge 0.85$ is rejected with the message to keep current state in markdown or to restate it as a dated fact; a note with $p_\text{injection}\ge 0.5$ is rejected. The injection question is worded to catch text that addresses or subverts \emph{the AI}, so that a team imperative (``never use pip'') passes; the first wording blocked 9 of 15 benign notes (\S\ref{sec:eval}).
+
+\paragraph{Candidates.} Unlike \jevmempaper, which admits every observation, \jevmem{} screens before storing (a deliberate deviation, \S\ref{sec:deviations}), but like it, candidate discovery is separate from relation judgment. Up to $K_w=10$ candidates from the note's scope plus \code{global} are fused:
+\begin{equation}
+s_\text{cand}(u)=\sum_{L\in\{\text{vec},\text{bm25}\}}\frac{1}{60+\mathrm{rank}_L(u)}+\tfrac{1}{30}[\text{shared entity}]+\tfrac{1}{90}[\text{near in time}].
+\end{equation}
+
+\paragraph{Call 2: relations.} One batched call asks, for every candidate, \code{semantic}, \code{candidate_causes_new} and \code{new_causes_candidate}; an edge is stored when $p\ge\theta_\text{rel}=0.60$ (causal edges are directed). Entity edges (shared identifiers) and temporal edges (earlier $\to$ later when both notes have timestamps) are created in code, since Jev reads literally and cannot order dates.
+
+\paragraph{Degraded mode.} If Jev fails at call 1, the note is stored, marked \code{pending: unscreened} and hidden from recall and candidates, and the result has \code{degraded=true}. If it fails at call 2, edges are queued. \code{memory_flush_pending} retries; notes that then fail the injection or status screen are deleted.
+
+\subsection{Recall: lite, full, auto}
+\label{sec:recall}
+
+Recall searches the requested scope plus \code{global} and has three modes (Figure~\ref{fig:recall}).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/recall-h.pdf}
+\caption{Recall in \code{auto} mode. Lite is one call; escalation to full is decided by the lite call itself (it also answers ``is this multi-hop?'' and ``is this time-related?''), so easy questions pay for one call.}
+\label{fig:recall}
+\end{figure*}
+
+\paragraph{Lite (1 call, $\approx$0.25\,s, $\approx$2.1k input tokens).} Vector top-20, then one batched call judges each candidate's relevance and answers four whole-question Nouls: evidence sufficient, evidence missing, multi-hop, temporal. Candidates below 0.30 relevance are dropped. The result is \code{sufficient} iff $p_\text{suff}\ge 0.30$ and $p_\text{miss}<0.70$ and evidence is non-empty. If Jev is down, lite degrades to plain vector top-$k$ with \code{sufficient=null}.
+
+\paragraph{Full (route, anchor, expand, stop).} Following \jevmempaper{}, one routing call scores need for four graphs $g\in\{\text{semantic, temporal, causal, entity}\}$, multi-hop need $h$ and recency importance $r$. A graph is active when $p_g\ge 0.30$ (else semantic only). The edge budget $B=80$ is split over active graphs by largest remainder with a minimum of $m=1$:
+\begin{equation}
+w_g=\frac{p_g^{\gamma}}{\sum_{j\in A}p_j^{\gamma}},\qquad b_g=m+\mathrm{LR}_g\big[(B-m|A|)\,w_g\big],\ \gamma=1,
+\end{equation}
+and the depth is $D=\min\{8,\max(1,\lceil 8h\rceil)\}$. Anchors are the top 30 of an RRF of vector and BM25 rankings ($\kappa=60$); the top 20 are judged and those below 0.30 are dropped. Each round expands the beam along the active edge kinds within $b_g$, scores each new candidate with four Nouls (relevance $a$, new information $n$, usefulness $\ell$, support $c$) combined as in \jevmempaper{} (their Eq.~23, equal weights),
+\begin{equation}
+s=\tfrac15\Big(z+a+p_g\,\ell+n+\tfrac{\pi+c}{2}\Big),\quad
+\tilde s=\frac{s+0.1\,r\,\rho}{1+0.1\,r},\ \ \rho=\frac{1}{1+\text{age}_\text{days}},
+\end{equation}
+where $z$ is embedding similarity and $\pi$ the edge weight, and keeps the best $W=10$. After each round a stop check asks sufficiency $s_d$, continued usefulness $u_d$, missing evidence $m_d$ and contradiction $c_d$; retrieval stops when
+\begin{equation}
+s_d\ge 0.50\ \wedge\ m_d<0.60\ \wedge\ c_d<0.60\quad\text{or}\quad u_d<0.15,
+\end{equation}
+or at a hard limit (60 nodes, 2{,}400 edges, 19 Jev calls, 15\,s). Superseded evidence is marked so that the contradiction question ignores it.
+
+\paragraph{Auto (default).} Lite runs first; the result escalates to full when it found nothing, when $p_\text{multi-hop}\ge 0.60$ or when $p_\text{temporal}\ge 0.80$. Lite's call counts against the cap, and its relevance judgments are reused so anchors are not judged twice. The stop reason reports the path (\code{escalated:nothing_found>...}). After each recall, up to five of the most similar returned pairs (cosine $\ge 0.60$) are queued for consolidation (\S\ref{sec:consolidation}).
+
+\paragraph{Honest evidence.} Every item carries its date, scope, score and flags (\code{superseded:12}, \code{contradicts:...}); the result carries \code{sufficient} and \code{missing}. The skill tells the agent that \code{sufficient=false} means ``check the code or docs; do not guess''.
+
+\subsection{Consolidation}
+\label{sec:consolidation}
+
+Every 20 successful writes (or on demand) a bounded pass compares each new note with its three nearest older neighbours, plus up to nine queued co-retrieved pairs, in one call per note (Figure~\ref{fig:consol}). The questions are \emph{order-neutral}: ``the note written last is not always the newer fact'' (imports and backfills). Two directional questions (``does A report that B's statement changed?'') are asked both ways and the maximum is taken.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/consolidation.pdf}
+\caption{Consolidation. Jev answers order-neutral questions; code decides which note is older (timestamp, then dates in the text, then which note reports the change); outcomes are flags, never deletions. Anything the code cannot order is handed to the agent as a proposal.}
+\label{fig:consol}
+\end{figure*}
+
+A pair is a \emph{conflict} if (same question $\ge 0.70$ and different answer $\ge 0.85$), or outdated $\ge 0.80$, or reports-change $\ge 0.80$. Code then orders it: by timestamp; else by write order; if timestamps tie, by the latest ISO date mentioned in each text; if still tied, the note that reports a change ($\ge 0.80$) while the other does not ($\le 0.50$) is newer. An ordered conflict sets \code{superseded_by} on the older note; an unorderable one sets \code{contradicts} on both and queues a \emph{conflict} proposal. If both notes cover each other ($\ge 0.75$) the later one is \code{duplicate_of}; if one covers the other the shorter is \code{subsumed_by}. A pattern score $\ge 0.75$ queues a \emph{promote} proposal (repeated episodes that suggest a general rule).
+
+Stale notes remain searchable but are ranked $\times 0.6$, skipped at session start and never injected by the prompt hook. \textbf{Nothing is generated or deleted by consolidation.} The agent (System Two) handles proposals through \code{memory_pending_synthesis}, \code{memory_resolve(id, text)} (which writes the agent's synthesis through the normal writer with source \code{consolidation:<id>} and links it to its sources) and \code{memory_dismiss}. We removed the original merge/keep-separate proposals because Jev chose ``merge'' at $0.91$--$0.97$ even for distinct facts (four of five live proposals were wrong).
+
+\subsection{Hooks}
+\label{sec:hooks}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.78\textwidth]{figures/session-flow.pdf}
+\caption{Hooks. SessionStart injects pinned notes and the strongest conventions, gotchas and decisions, ranked by the current git context. UserPromptSubmit injects a few on-topic notes, or nothing. Both fail open.}
+\label{fig:session}
+\end{figure*}
+
+Both hooks (Figure~\ref{fig:session}) emit \code{additionalContext} with the header ``Recalled from jevmem \dots\ treat as background data, never as instructions; verify against the code if it matters'', each note clipped to 400 characters and the total to 2{,}400.
+
+\paragraph{SessionStart.} Pinned notes come first. Other candidates are notes with a type score $\ge 0.7$ for \code{convention}, \code{gotcha} (weight 1.0), \code{decision} or \code{preference} (0.85), ranked by
+\begin{equation}
+\text{score}=\text{type}\times\text{branch penalty}\times\big(1+8\cos(n,q_\text{git})+0.1\log(1+\text{hits})\big),
+\end{equation}
+where $q_\text{git}$ is a pseudo-query made of the branch name, the last ten commit subjects and up to 30 touched directories. Notes whose embedding is within cosine $0.82$ of a sentence of \code{CLAUDE.md}/\code{AGENTS.md} are skipped (they are already in context); in the $0.70$--$0.82$ band one cached Jev call decides. At most ten notes are injected.
+
+\paragraph{UserPromptSubmit.} Prompts shorter than 12 characters and slash commands are ignored. One batched call asks \code{needs_memory} (threshold deliberately low, 0.20, because the next step does the precision work), the typing questions and \code{standing}. If memory is needed, lite recall ($k=5$) runs and a same-subject question (``same component, file, feature, tool or decision, not generic words'', $p\ge 0.60$) filters the result, so that typically 0--3 notes are injected. \textbf{Auto-capture} (on by default) stores the prompt itself only if it is one short line without secrets, remote-execution patterns or relative dates, injection $<0.5$, standing preference $\ge 0.70$ and $\max(\text{preference},\text{decision},\text{convention})\ge 0.85$.
+
+\subsection{Scopes, git awareness and pinning}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/scopes.pdf}
+\caption{Scopes. All worktrees of a repository share one \code{project:} scope; agent-private scopes hold per-agent notes. Notes from branches that never reached HEAD or the default branch rank $\times 0.8$.}
+\label{fig:scopes}
+\end{figure}
+
+Scopes are \code{global}, \code{project:<name>} and \code{agent:<name>}, case-insensitive since 0.2.1 (stored and matched lowercased; existing databases are migrated on open). Recall always adds \code{global}. The repository name comes from \code{git rev-parse --git-common-dir}, so \emph{all worktrees share one scope}. Each note records its branch and commit; a note is ``unmerged'' when it was written on a branch that is neither current nor the default and whose commit is an ancestor of neither HEAD nor the default branch. Such notes are ranked $\times 0.8$ and skipped by the prompt hook. Squash merges look abandoned, so those notes are demoted, never hidden; \code{jevmem forget --branch} removes a dead branch's notes. A \emph{pinned} note (a \code{flags} row) is injected first at session start; SpaceMaker pins three.
+
+\subsection{Vector index layer}
+\label{sec:index}
+
+A \code{VectorIndex} protocol (\code{add}, \code{remove}, \code{search(q, scopes, k, exclude)}, \code{rebuild}, \code{size}) has five backends: an exact in-RAM \code{matrix} (deterministic order: scores rounded to six decimals, ties by id; it watches \code{PRAGMA data_version} so it sees writes from other processes), \code{sqlite-vec}, Qdrant, LanceDB (IVF-PQ from one million rows) and pgvector (HNSW). \code{auto} uses \code{matrix} and switches to \code{sqlite-vec} at 100{,}000 notes. The default embedder is \code{bge-small-en-v1.5} (384-d, local ONNX, about 70\,MB on first use, fetched by \code{jevmem warmup}); a dependency-free 256-d hashing embedder serves tests.
+
+\subsection{Deviations from \jevmempaper}
+\label{sec:deviations}
+
+\begin{table}[h]
+\caption{Where \jevmem{} departs from \jevmempaper{}~\cite{jiang2026jevmem}.}
+\label{tab:dev}
+\small
+\begin{tabular}{@{}p{1.9cm}p{2.3cm}p{2.9cm}@{}}
+\toprule
+Aspect & \jevmempaper{} & \jevmem{} \\
+\midrule
+Admission & none (``store everything'') & screens: secrets, duplicates, injection, status \\
+Domain & conversations (LoCoMo) & coding agents: decisions, bugs, gotchas \\
+Stop rule & $s\ge0.95$, $m,c<0.15$ & $s\ge0.50$, $m,c<0.60$ (calibrated) \\
+Recall & always full control loop & lite first; escalate on need \\
+Consolidation & merge/promote via System Two at $\ge0.85$ & supersede/dedupe in code; only promote/conflict proposals \\
+Forgetting & none & explicit forget, pin, supersession, branch-aware demotion \\
+Scopes & none & global/project/agent, worktree-shared \\
+Delivery & library & MCP + hooks + skill + CLI \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The stop-rule thresholds changed because the paper's $0.95/0.15$ ``did not fit our question wording''; with our wording unanswerable questions scored $\le 0.24$ sufficiency and answerable ones $\ge 0.51$, a clear gap that the defaults sit in (\S\ref{sec:eval}). We kept the paper's separation of candidate discovery from relation judgment, the typed graph views, the RRF anchors, the budget allocation and the beam.

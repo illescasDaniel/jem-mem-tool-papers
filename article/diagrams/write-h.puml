@@ -1,0 +1,31 @@
+@startuml write-h
+!include style.iuml
+skinparam rectangle {
+  RoundCorner 12
+}
+left to right direction
+
+rectangle "memory_write\n(content, scope,\nentities, timestamp)" as in
+rectangle "**Code gates**\n(no model call)\nsecret regex\ncosine ≥ 0.97\nduplicate" as g #E0F2FE
+rectangle "**Jev call 1**\n8 type scores\n+ status ≥ 0.85\n+ injection ≥ 0.50" as j1 #DCFCE7
+rectangle "**Candidates**\nvector top-20 ⊕ BM25 top-20\n+ shared entities\n+ nearest in time\n(RRF, K_w = 10)" as c #E0F2FE
+rectangle "**Jev call 2**\nsemantic · causes ·\ncaused-by per pair\nedge if p ≥ 0.60" as j2 #DCFCE7
+rectangle "**Code edges**\nentity (shared id)\ntemporal (timestamp\norder)" as e #E0F2FE
+database "SQLite\nnode + edges\n+ FTS5 + vector" as db
+
+rectangle "rejected:\ncredential / duplicate" as r1 #FECACA
+rectangle "rejected:\nstatus / injection" as r2 #FECACA
+rectangle "Jev down: stored,\nhidden, queued\n(pending: unscreened /\nrelations)" as q #FEF3C7
+
+in --> g
+g --> j1
+g --> r1
+j1 --> c
+j1 --> r2
+c --> j2
+c --> e
+j2 --> db
+e --> db
+j1 ..> q
+j2 ..> q
+@enduml

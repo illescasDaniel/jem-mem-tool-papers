@@ -1,0 +1,30 @@
+@startuml lifecycle
+!include style.iuml
+title One session across the three tiers
+actor Developer as dev
+participant "Agent" as ag
+participant "memory/\n(git markdown)" as mb
+participant "jevmem\n(hooks + MCP)" as jm
+participant "AGENTS.md" as ai
+
+== Session start ==
+ai --> ag : rules (always loaded)
+jm --> ag : SessionStart: pinned notes, then conventions\nand gotchas ranked by branch / commits\n(skips notes AGENTS.md already says)
+ag -> mb : read activeContext.md, then progress.md
+ag -> ag : stale against git log? say so and ask first
+
+== Work ==
+dev -> ag : prompt
+jm --> ag : UserPromptSubmit: 0-3 on-topic notes (or nothing)
+ag -> jm : memory_recall(question)\nsufficient=false -> check the code, do not guess
+ag -> mb : trigger-based edits only\n(task done, focus change, blocker)
+
+== A decision, bug cause or gotcha is settled ==
+ag -> mb : decisions.md: context / decision / rationale
+ag -> jm : memory_write: one dated fact + its reason\n(status-like notes are rejected)
+jm -> jm : every 20 writes: supersede, dedupe,\nflag conflicts, queue promote proposals
+
+== Hand-off ==
+ag -> mb : progress checkboxes accurate,\nactiveContext names the exact next step
+ag -> mb : commit with the feature (or "memory:" commit)
+@enduml
